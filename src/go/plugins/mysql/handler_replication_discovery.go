@@ -25,9 +25,14 @@ func replicationDiscoveryHandler(ctx context.Context, conn MyClient, _ map[strin
 	_ ...string) (interface{}, error) {
 	res := make([]map[string]string, 0)
 
+	// try SHOW SLAVE STATUS (MySQL <= 5.7)
 	rows, err := conn.Query(ctx, `SHOW SLAVE STATUS`)
 	if err != nil {
-		return nil, zbxerr.ErrorCannotFetchData.Wrap(err)
+		// if error, try SHOW REPLICA STATUS (MySQL >= 8.0)
+		rows, err = conn.Query(ctx, `SHOW REPLICA STATUS`)
+		if err != nil {
+			return nil, zbxerr.ErrorCannotFetchData.Wrap(err)
+		}
 	}
 
 	data, err := rows2data(rows)
@@ -36,6 +41,9 @@ func replicationDiscoveryHandler(ctx context.Context, conn MyClient, _ map[strin
 	}
 
 	for _, row := range data {
+		if val, ok := row["Source_Host"]; ok {
+			row["Master_Host"] = val
+		}
 		res = append(res, map[string]string{"Master_Host": row["Master_Host"]})
 	}
 
