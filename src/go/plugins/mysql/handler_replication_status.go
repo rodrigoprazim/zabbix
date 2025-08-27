@@ -23,14 +23,25 @@ import (
 	"golang.zabbix.com/sdk/zbxerr"
 )
 
-const masterKey = "Master_Host"
+const (
+	masterKey = "Master_Host"
+	sourceKey = "Source_Host"
+)
 
 func replicationSlaveStatusHandler(
 	ctx context.Context, conn MyClient, params map[string]string, _ ...string,
 ) (any, error) {
-	rows, err := conn.Query(ctx, `SHOW SLAVE STATUS`)
+	var rows Rows
+	var err error
+
+	// try SHOW SLAVE STATUS (MySQL <= 5.7)
+	rows, err = conn.Query(ctx, `SHOW SLAVE STATUS`)
 	if err != nil {
-		return nil, zbxerr.ErrorCannotFetchData.Wrap(err)
+		// if error, try SHOW REPLICA STATUS (MySQL >= 8.0)
+		rows, err = conn.Query(ctx, `SHOW REPLICA STATUS`)
+		if err != nil {
+			return nil, zbxerr.ErrorCannotFetchData.Wrap(err)
+		}
 	}
 
 	data, err := rows2data(rows)
@@ -40,6 +51,12 @@ func replicationSlaveStatusHandler(
 
 	if len(data) == 0 {
 		return nil, zbxerr.ErrorEmptyResult.Wrap(errors.New("replication is not configured"))
+	}
+
+	for _, row := range data {
+		if val, ok := row[sourceKey]; ok {
+			row[masterKey] = val
+		}
 	}
 
 	if params[masterHostParam] != "" {
